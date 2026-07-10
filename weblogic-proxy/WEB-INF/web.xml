@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://java.sun.com/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://java.sun.com/xml/ns/javaee
+         http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"
+         version="3.0">
+
+    <display-name>Population Dashboard Proxy</display-name>
+
+    <!-- Proxy for FastAPI backend (must be declared FIRST so /api/* is matched before /*) -->
+    <servlet>
+        <servlet-name>FastAPIProxy</servlet-name>
+        <servlet-class>weblogic.servlet.proxy.HttpProxyServlet</servlet-class>
+        <init-param>
+            <param-name>redirectURL</param-name>
+            <param-value>http://localhost:8000</param-value>
+        </init-param>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>FastAPIProxy</servlet-name>
+        <url-pattern>/api/*</url-pattern>
+    </servlet-mapping>
+
+    <!-- Proxy for Streamlit frontend (catch-all) -->
+    <servlet>
+        <servlet-name>StreamlitProxy</servlet-name>
+        <servlet-class>weblogic.servlet.proxy.HttpProxyServlet</servlet-class>
+        <init-param>
+            <param-name>redirectURL</param-name>
+            <param-value>http://localhost:8501</param-value>
+        </init-param>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>StreamlitProxy</servlet-name>
+        <url-pattern>/*</url-pattern>
+    </servlet-mapping>
+
+</web-app>
