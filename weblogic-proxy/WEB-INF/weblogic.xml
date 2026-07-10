@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<weblogic-web-app xmlns="http://xmlns.oracle.com/weblogic/weblogic-web-app">
-    <context-root>/dashboard</context-root>
-</weblogic-web-app>
