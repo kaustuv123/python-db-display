@@ -11,8 +11,12 @@ RUN pip install --no-cache-dir --default-timeout=600 -r requirements.txt
 COPY backend.py .
 COPY database.py .
 COPY chart_render.py .
+COPY png_export.py .
 COPY add_data.py .
 COPY start.sh .
+
+# Optional: mount or set PNG_EXPORT_DIR so charts write every 2 min on data change
+ENV PNG_EXPORT_DIR=/data/charts
 
 # Make startup script executable
 RUN chmod +x start.sh

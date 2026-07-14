@@ -1,7 +1,7 @@
 """
-Chart render — Plotly pie charts exported as SVG via Kaleido.
+Chart render — Plotly pie charts exported as SVG/PNG via Kaleido.
 
-Reads plain country/population rows (from the DB) and returns SVG strings.
+Reads plain country/population rows (from the DB) and returns image bytes/strings.
 """
 
 from __future__ import annotations
@@ -17,8 +17,12 @@ import plotly.graph_objects as go
 _COLORS = px.colors.qualitative.Pastel
 
 # Kaleido spawns a browser; serialize exports to avoid subprocess races.
-_SVG_LOCK = Lock()
-_SVG_MAX_ATTEMPTS = 3
+_IMAGE_LOCK = Lock()
+_IMAGE_MAX_ATTEMPTS = 3
+
+# Default PNG dimensions for disk exports
+PNG_WIDTH = 600
+PNG_HEIGHT = 400
 
 PIE_SHARE = "share"
 PIE_TOP5 = "top5"
@@ -46,6 +50,17 @@ class PieChartSvg:
     id: str
     title: str
     svg: str
+
+
+@dataclass(frozen=True, slots=True)
+class PieChartPng:
+    """One rendered pie chart as PNG bytes."""
+
+    id: str
+    title: str
+    png: bytes
+    width: int
+    height: int
 
 
 class UnknownPieChart(ValueError):
@@ -134,24 +149,46 @@ def build_pie_figure(chart_id: str, slices: Sequence[PopSlice]) -> go.Figure:
     return fig
 
 
-def figure_to_svg(fig: go.Figure) -> str:
-    """Render a Plotly figure to an SVG document string via Kaleido."""
+def _figure_to_image(fig: go.Figure, *, format: str, width: int | None = None, height: int | None = None) -> bytes:
+    """Render a Plotly figure via Kaleido; retries on transient RuntimeError."""
     last_err: Exception | None = None
-    with _SVG_LOCK:
-        for attempt in range(_SVG_MAX_ATTEMPTS):
+    kwargs: dict = {"format": format}
+    if width is not None:
+        kwargs["width"] = width
+    if height is not None:
+        kwargs["height"] = height
+
+    with _IMAGE_LOCK:
+        for attempt in range(_IMAGE_MAX_ATTEMPTS):
             try:
-                raw = fig.to_image(format="svg")
+                raw = fig.to_image(**kwargs)
                 if isinstance(raw, bytes):
-                    return raw.decode("utf-8")
-                return str(raw)
+                    return raw
+                return bytes(raw)
             except RuntimeError as exc:
                 last_err = exc
-                if attempt + 1 < _SVG_MAX_ATTEMPTS:
+                if attempt + 1 < _IMAGE_MAX_ATTEMPTS:
                     time.sleep(0.15 * (attempt + 1))
                     continue
                 raise
     assert last_err is not None  # pragma: no cover
     raise last_err
+
+
+def figure_to_svg(fig: go.Figure) -> str:
+    """Render a Plotly figure to an SVG document string via Kaleido."""
+    raw = _figure_to_image(fig, format="svg")
+    return raw.decode("utf-8")
+
+
+def figure_to_png(
+    fig: go.Figure,
+    *,
+    width: int = PNG_WIDTH,
+    height: int = PNG_HEIGHT,
+) -> bytes:
+    """Render a Plotly figure to PNG bytes at the given pixel size."""
+    return _figure_to_image(fig, format="png", width=width, height=height)
 
 
 def render_pie_svg(chart_id: str, rows: Sequence[dict]) -> PieChartSvg:
@@ -164,3 +201,35 @@ def render_pie_svg(chart_id: str, rows: Sequence[dict]) -> PieChartSvg:
 def render_all_pie_svgs(rows: Sequence[dict]) -> tuple[PieChartSvg, ...]:
     """Render all supported pie charts from DB rows."""
     return tuple(render_pie_svg(chart_id, rows) for chart_id in PIE_CHART_IDS)
+
+
+def render_pie_png(
+    chart_id: str,
+    rows: Sequence[dict],
+    *,
+    width: int = PNG_WIDTH,
+    height: int = PNG_HEIGHT,
+) -> PieChartPng:
+    """Render one named pie chart as PNG from DB rows."""
+    slices = rows_to_slices(rows)
+    fig = build_pie_figure(chart_id, slices)
+    return PieChartPng(
+        id=chart_id,
+        title=pie_title(chart_id),
+        png=figure_to_png(fig, width=width, height=height),
+        width=width,
+        height=height,
+    )
+
+
+def render_all_pie_pngs(
+    rows: Sequence[dict],
+    *,
+    width: int = PNG_WIDTH,
+    height: int = PNG_HEIGHT,
+) -> tuple[PieChartPng, ...]:
+    """Render all supported pie charts as PNG from DB rows."""
+    return tuple(
+        render_pie_png(chart_id, rows, width=width, height=height)
+        for chart_id in PIE_CHART_IDS
+    )
