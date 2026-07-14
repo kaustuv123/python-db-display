@@ -1,7 +1,4 @@
 fastapi
 uvicorn
-streamlit
-requests
-pandas
 plotly
 kaleido

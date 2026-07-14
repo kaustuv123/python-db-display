@@ -1,6 +1,6 @@
 """
 Standalone script to add / update population data in the database.
-Use this during demos to show real-time updates on the dashboard.
+Use this to change rows; pie SVG endpoints re-read the DB on each request.
 
 Usage:
     python add_data.py                          # Interactive mode

@@ -1,8 +1,7 @@
 """
-FastAPI backend — read-only API for population data.
+Population API — JSON rows + live pie charts as SVG (Kaleido).
 
-Also exposes live Plotly pie charts as SVG (Kaleido). Each request re-reads
-SQLite so charts update when the DB changes.
+Each chart request re-reads SQLite so SVGs track DB updates.
 """
 
 from fastapi import FastAPI, HTTPException, Response

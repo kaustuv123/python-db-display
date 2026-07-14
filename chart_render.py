@@ -14,7 +14,6 @@ from typing import Mapping, Sequence
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Matches the Streamlit dashboard palette.
 _COLORS = px.colors.qualitative.Pastel
 
 # Kaleido spawns a browser; serialize exports to avoid subprocess races.
