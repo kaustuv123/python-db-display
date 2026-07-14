@@ -16,7 +16,7 @@ COPY add_data.py .
 COPY start.sh .
 
 # Optional: mount or set PNG_EXPORT_DIR so charts write every 2 min on data change
-ENV PNG_EXPORT_DIR=/data/charts
+ENV PNG_EXPORT_DIR=/home/oracle/product/fmw14.1.2/forms/images/
 
 # Make startup script executable
 RUN chmod +x start.sh
