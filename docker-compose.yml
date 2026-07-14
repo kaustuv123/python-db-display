@@ -1,13 +1,13 @@
 version: "3.9"
 
 services:
-  population-api:
+  ports-api:
     build: .
-    container_name: population-api
+    container_name: ports-api
     ports:
-      - "8000:8000"    # FastAPI — population + pie SVG charts
+      - "8000:8000"
     volumes:
-      - db-data:/app    # Persist SQLite database
+      - db-data:/app
     restart: unless-stopped
 
 volumes:

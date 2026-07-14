@@ -1,52 +1,39 @@
-"""
-Chart render — Plotly pie charts exported as SVG/PNG via Kaleido.
-
-Reads plain country/population rows (from the DB) and returns image bytes/strings.
-"""
+"""Plotly pie charts → SVG/PNG via Kaleido."""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from threading import Lock
-from typing import Mapping, Sequence
+from typing import Sequence
 
 import plotly.express as px
 import plotly.graph_objects as go
 
 _COLORS = px.colors.qualitative.Pastel
+_LOCK = Lock()
+_MAX_ATTEMPTS = 3
 
-# Kaleido spawns a browser; serialize exports to avoid subprocess races.
-_IMAGE_LOCK = Lock()
-_IMAGE_MAX_ATTEMPTS = 3
-
-# Default PNG dimensions for disk exports
 PNG_WIDTH = 600
 PNG_HEIGHT = 400
 
-PIE_SHARE = "share"
-PIE_TOP5 = "top5"
-PIE_TOP5_VS_REST = "top5-vs-rest"
+PIE_CHART_IDS: tuple[str, ...] = ("share", "top5", "top5-vs-rest")
 
-PIE_CHART_IDS: tuple[str, ...] = (PIE_SHARE, PIE_TOP5, PIE_TOP5_VS_REST)
-
-_PIE_TITLES: Mapping[str, str] = {
-    PIE_SHARE: "Population Share",
-    PIE_TOP5: "Top 5 Population Share",
-    PIE_TOP5_VS_REST: "Top 5 vs Rest",
+_PIE_TITLES = {
+    "share": "Container Share by Terminal",
+    "top5": "Top 5 Terminal Container Share",
+    "top5-vs-rest": "Top 5 Terminals vs Rest",
 }
 
 
 @dataclass(frozen=True, slots=True)
-class PopSlice:
-    country: str
-    population: int
+class Slice:
+    port_terminal: str
+    containers: int
 
 
 @dataclass(frozen=True, slots=True)
 class PieChartSvg:
-    """One rendered pie chart as SVG."""
-
     id: str
     title: str
     svg: str
@@ -54,66 +41,52 @@ class PieChartSvg:
 
 @dataclass(frozen=True, slots=True)
 class PieChartPng:
-    """One rendered pie chart as PNG bytes."""
-
     id: str
     title: str
     png: bytes
-    width: int
-    height: int
 
 
 class UnknownPieChart(ValueError):
-    """chart_id is not one of the supported pie variants."""
+    pass
 
 
 def pie_title(chart_id: str) -> str:
-    if chart_id not in _PIE_TITLES:
+    try:
+        return _PIE_TITLES[chart_id]
+    except KeyError as exc:
         raise UnknownPieChart(
             f"Unknown pie chart id {chart_id!r}; expected one of {list(PIE_CHART_IDS)}"
-        )
-    return _PIE_TITLES[chart_id]
+        ) from exc
 
 
-def rows_to_slices(rows: Sequence[dict]) -> list[PopSlice]:
-    """
-    Map DB/API-style rows to slices ordered by population DESC, country ASC.
-    Each row needs keys: country, population.
-    """
-    cleaned: list[PopSlice] = []
-    for r in rows:
-        country = str(r["country"]).strip()
-        population = int(r["population"])
-        if not country or population < 0:
-            continue
-        cleaned.append(PopSlice(country=country, population=population))
-    cleaned.sort(key=lambda s: (-s.population, s.country))
+def rows_to_slices(rows: Sequence[dict]) -> list[Slice]:
+    """Map rows (port_terminal, containers) → sorted slices."""
+    cleaned = [
+        Slice(str(r["port_terminal"]).strip(), int(r["containers"]))
+        for r in rows
+        if str(r.get("port_terminal", "")).strip() and int(r["containers"]) >= 0
+    ]
+    cleaned.sort(key=lambda s: (-s.containers, s.port_terminal))
     return cleaned
 
 
-def _slices_for_pie(chart_id: str, slices: Sequence[PopSlice]) -> list[PopSlice]:
-    if chart_id == PIE_SHARE:
+def _slices_for_pie(chart_id: str, slices: Sequence[Slice]) -> list[Slice]:
+    if chart_id == "share":
         return list(slices)
-
-    if chart_id == PIE_TOP5:
+    if chart_id == "top5":
         return list(slices[:5])
-
-    if chart_id == PIE_TOP5_VS_REST:
+    if chart_id == "top5-vs-rest":
         if not slices:
             return []
         top = list(slices[:5])
-        rest_pop = sum(s.population for s in slices[5:])
-        if rest_pop > 0:
-            top.append(PopSlice(country="Other", population=rest_pop))
+        rest = sum(s.containers for s in slices[5:])
+        if rest > 0:
+            top.append(Slice("Other", rest))
         return top
-
-    raise UnknownPieChart(
-        f"Unknown pie chart id {chart_id!r}; expected one of {list(PIE_CHART_IDS)}"
-    )
+    raise UnknownPieChart(chart_id)
 
 
-def build_pie_figure(chart_id: str, slices: Sequence[PopSlice]) -> go.Figure:
-    """Build a Plotly pie figure for the given chart id and slice series."""
+def _build_figure(chart_id: str, slices: Sequence[Slice]) -> go.Figure:
     title = pie_title(chart_id)
     series = _slices_for_pie(chart_id, slices)
 
@@ -131,8 +104,8 @@ def build_pie_figure(chart_id: str, slices: Sequence[PopSlice]) -> go.Figure:
         )
     else:
         fig = px.pie(
-            names=[s.country for s in series],
-            values=[s.population for s in series],
+            names=[s.port_terminal for s in series],
+            values=[s.containers for s in series],
             color_discrete_sequence=_COLORS,
             hole=0.4,
             title=title,
@@ -149,58 +122,28 @@ def build_pie_figure(chart_id: str, slices: Sequence[PopSlice]) -> go.Figure:
     return fig
 
 
-def _figure_to_image(fig: go.Figure, *, format: str, width: int | None = None, height: int | None = None) -> bytes:
-    """Render a Plotly figure via Kaleido; retries on transient RuntimeError."""
-    last_err: Exception | None = None
-    kwargs: dict = {"format": format}
-    if width is not None:
-        kwargs["width"] = width
-    if height is not None:
-        kwargs["height"] = height
-
-    with _IMAGE_LOCK:
-        for attempt in range(_IMAGE_MAX_ATTEMPTS):
+def _to_image(fig: go.Figure, **kwargs) -> bytes:
+    """Kaleido export with retries (browser subprocess can flake)."""
+    with _LOCK:
+        for attempt in range(_MAX_ATTEMPTS):
             try:
                 raw = fig.to_image(**kwargs)
-                if isinstance(raw, bytes):
-                    return raw
-                return bytes(raw)
-            except RuntimeError as exc:
-                last_err = exc
-                if attempt + 1 < _IMAGE_MAX_ATTEMPTS:
-                    time.sleep(0.15 * (attempt + 1))
-                    continue
-                raise
-    assert last_err is not None  # pragma: no cover
-    raise last_err
-
-
-def figure_to_svg(fig: go.Figure) -> str:
-    """Render a Plotly figure to an SVG document string via Kaleido."""
-    raw = _figure_to_image(fig, format="svg")
-    return raw.decode("utf-8")
-
-
-def figure_to_png(
-    fig: go.Figure,
-    *,
-    width: int = PNG_WIDTH,
-    height: int = PNG_HEIGHT,
-) -> bytes:
-    """Render a Plotly figure to PNG bytes at the given pixel size."""
-    return _figure_to_image(fig, format="png", width=width, height=height)
+                return raw if isinstance(raw, bytes) else bytes(raw)
+            except RuntimeError:
+                if attempt + 1 >= _MAX_ATTEMPTS:
+                    raise
+                time.sleep(0.15 * (attempt + 1))
+    raise RuntimeError("image export failed")  # pragma: no cover
 
 
 def render_pie_svg(chart_id: str, rows: Sequence[dict]) -> PieChartSvg:
-    """Render one named pie chart from DB rows."""
-    slices = rows_to_slices(rows)
-    fig = build_pie_figure(chart_id, slices)
-    return PieChartSvg(id=chart_id, title=pie_title(chart_id), svg=figure_to_svg(fig))
+    fig = _build_figure(chart_id, rows_to_slices(rows))
+    svg = _to_image(fig, format="svg").decode("utf-8")
+    return PieChartSvg(chart_id, pie_title(chart_id), svg)
 
 
 def render_all_pie_svgs(rows: Sequence[dict]) -> tuple[PieChartSvg, ...]:
-    """Render all supported pie charts from DB rows."""
-    return tuple(render_pie_svg(chart_id, rows) for chart_id in PIE_CHART_IDS)
+    return tuple(render_pie_svg(cid, rows) for cid in PIE_CHART_IDS)
 
 
 def render_pie_png(
@@ -210,16 +153,9 @@ def render_pie_png(
     width: int = PNG_WIDTH,
     height: int = PNG_HEIGHT,
 ) -> PieChartPng:
-    """Render one named pie chart as PNG from DB rows."""
-    slices = rows_to_slices(rows)
-    fig = build_pie_figure(chart_id, slices)
-    return PieChartPng(
-        id=chart_id,
-        title=pie_title(chart_id),
-        png=figure_to_png(fig, width=width, height=height),
-        width=width,
-        height=height,
-    )
+    fig = _build_figure(chart_id, rows_to_slices(rows))
+    png = _to_image(fig, format="png", width=width, height=height)
+    return PieChartPng(chart_id, pie_title(chart_id), png)
 
 
 def render_all_pie_pngs(
@@ -228,8 +164,6 @@ def render_all_pie_pngs(
     width: int = PNG_WIDTH,
     height: int = PNG_HEIGHT,
 ) -> tuple[PieChartPng, ...]:
-    """Render all supported pie charts as PNG from DB rows."""
     return tuple(
-        render_pie_png(chart_id, rows, width=width, height=height)
-        for chart_id in PIE_CHART_IDS
+        render_pie_png(cid, rows, width=width, height=height) for cid in PIE_CHART_IDS
     )
