@@ -12,6 +12,7 @@ COPY backend.py .
 COPY frontend.py .
 COPY database.py .
 COPY add_data.py .
+COPY chart_render.py .
 COPY start.sh .
 
 # Make startup script executable
