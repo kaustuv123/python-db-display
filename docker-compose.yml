@@ -1,14 +1,14 @@
-version: "3.9"
-
 services:
-  ports-api:
+  pie-watcher:
     build: .
-    container_name: ports-api
-    ports:
-      - "8000:8000"
+    container_name: pie-watcher
+    environment:
+      PORTS_DB_PATH: /data/ports.db
+      PNG_EXPORT_DIR: /exports
+      PNG_EXPORT_INTERVAL_SEC: "120"
     volumes:
-      - db-data:/app
+      # Live SQLite file from this project
+      - ./ports.db:/data/ports.db
+      # PNGs land on your machine (same names, overwritten each cycle)
+      - C:/Users/kaust/Downloads/pie:/exports
     restart: unless-stopped
-
-volumes:
-  db-data:

@@ -3,13 +3,16 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --default-timeout=600 -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
-COPY backend.py database.py chart_render.py png_export.py add_data.py start.sh ./
-RUN chmod +x start.sh
+COPY db.py charts.py watcher.py ./
 
-# PNG export path (override at runtime if needed)
-ENV PNG_EXPORT_DIR=/home/oracle/product/fmw14.1.2/forms/images/
+# Paths inside the container; host mounts override via compose
+ENV PORTS_DB_PATH=/data/ports.db
+ENV PNG_EXPORT_DIR=/exports
+ENV PNG_EXPORT_INTERVAL_SEC=120
 
-EXPOSE 8000
-CMD ["./start.sh"]
+RUN mkdir -p /data /exports
+
+CMD ["python", "watcher.py"]
