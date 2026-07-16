@@ -1,14 +1,30 @@
+# Oracle pie-watcher (single compose file for the server).
+#
+# Before first start:
+#   1) Run sql/oracle_schema.sql then sql/oracle_seed.sql (SQL*Plus / SQL Developer)
+#   2) cp .env.oracle.example .env  and set credentials
+#   3) docker compose --env-file .env up -d --build
+#
+# Connect DSN-less (recommended): ORACLE_HOST + ORACLE_PORT + ORACLE_SERVICE_NAME
+# Or set ORACLE_DSN=host:port/service  (leave HOST empty)
+
 services:
   pie-watcher:
     build: .
     container_name: pie-watcher
     environment:
-      PORTS_DB_PATH: /data/ports.db
+      DB_BACKEND: oracle
+      ORACLE_USER: ${ORACLE_USER:-your_schema_user}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-your_password}
+      # DSN-less (no tnsnames.ora)
+      ORACLE_HOST: ${ORACLE_HOST:-}
+      ORACLE_PORT: ${ORACLE_PORT:-1521}
+      ORACLE_SERVICE_NAME: ${ORACLE_SERVICE_NAME:-}
+      # Optional fallback if HOST is empty: host:port/service
+      ORACLE_DSN: ${ORACLE_DSN:-}
+      ORACLE_TABLE: ${ORACLE_TABLE:-port_containers}
       PNG_EXPORT_DIR: /exports
       PNG_EXPORT_INTERVAL_SEC: "120"
     volumes:
-      # Live SQLite file from this project
-      - ./ports.db:/data/ports.db
-      # PNGs land on your machine (same names, overwritten each cycle)
-      - C:/Users/kaust/Downloads/pie:/exports
+      - ${PNG_EXPORT_HOST_PATH:-./exports}:/exports
     restart: unless-stopped

@@ -1,12 +1,7 @@
 """
-Layer 3 — Watcher (process entrypoint).
+Watcher (process entrypoint).
 
-Job: every 2 minutes, load DB → always redraw the three PNGs.
-
-First principles:
-  - A "watcher" is just a loop + sleep — not magic events from SQLite.
-  - Every cycle rewrites the same three filenames (overwrite in place).
-  - Ctrl+C stops cleanly.
+Job: every 2 minutes, load rows from SQLite or Oracle → always redraw charts.
 """
 
 from __future__ import annotations
@@ -16,7 +11,7 @@ import os
 import time
 
 from charts import EXPORT_DIR, render_all
-from db import DB_PATH, load_rows
+from db import backend_label, load_rows
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,11 +23,11 @@ INTERVAL_SEC = int(os.environ.get("PNG_EXPORT_INTERVAL_SEC", "120"))
 
 
 def run_once() -> None:
-    """One cycle: load rows and write all three PNGs."""
+    """One cycle: load rows and write all chart PNGs/WebPs."""
     rows = load_rows()
     paths = render_all(rows)
     logger.info(
-        "Wrote %d PNG(s) from %d rows → %s",
+        "Wrote %d file(s) from %d rows → %s",
         len(paths),
         len(rows),
         EXPORT_DIR,
@@ -42,12 +37,11 @@ def run_once() -> None:
 
 
 def main() -> None:
-    logger.info("DB:       %s", DB_PATH)
+    logger.info("Backend:  %s", backend_label())
     logger.info("Export:   %s", EXPORT_DIR)
     logger.info("Interval: %ss (always rewrite)", INTERVAL_SEC)
     logger.info("Press Ctrl+C to stop.")
 
-    # First cycle runs immediately.
     try:
         while True:
             try:

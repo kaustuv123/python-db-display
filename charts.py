@@ -30,19 +30,22 @@ DPI = 120
 # Both formats every cycle (WebP needs Pillow — already a matplotlib dependency path)
 EXPORT_FORMATS: tuple[str, ...] = ("png", "webp")
 
-CHART_IDS: tuple[str, ...] = ("share", "top5", "top5-vs-rest")
+# How many largest terminals appear in the pie charts
+TOP_N = 25
+
+CHART_IDS: tuple[str, ...] = ("share", "top25", "top25-vs-rest")
 
 TITLES = {
     "share": "Container Share by Terminal (all)",
-    "top5": "Top 5 Terminal Container Share",
-    "top5-vs-rest": "Top 5 Terminals vs Rest",
+    "top25": f"Top {TOP_N} Terminal Container Share",
+    "top25-vs-rest": f"Top {TOP_N} Terminals vs Rest",
 }
 
 # Basename without extension — we write containers-share.png and .webp, etc.
 BASENAMES = {
     "share": "containers-share",
-    "top5": "containers-top5",
-    "top5-vs-rest": "containers-top5-vs-rest",
+    "top25": "containers-top25",
+    "top25-vs-rest": "containers-top25-vs-rest",
 }
 
 
@@ -68,19 +71,19 @@ def slices_for_chart(chart_id: str, slices: Sequence[Slice]) -> list[Slice]:
     """
     Recipes:
 
-      share         → every terminal (vertical bar chart)
-      top5          → only the five largest (pie)
-      top5-vs-rest  → five largest + one "Other" bucket (pie)
+      share           → every terminal (vertical bar chart)
+      top25           → only the TOP_N largest (pie)
+      top25-vs-rest   → TOP_N largest + one "Other" bucket (pie)
     """
     if chart_id == "share":
         return list(slices)
-    if chart_id == "top5":
-        return list(slices[:5])
-    if chart_id == "top5-vs-rest":
+    if chart_id == "top25":
+        return list(slices[:TOP_N])
+    if chart_id == "top25-vs-rest":
         if not slices:
             return []
-        top = list(slices[:5])
-        rest = sum(s.value for s in slices[5:])
+        top = list(slices[:TOP_N])
+        rest = sum(s.value for s in slices[TOP_N:])
         if rest > 0:
             top.append(Slice("Other", rest))
         return top
@@ -120,9 +123,9 @@ def _draw_share_bars(series: Sequence[Slice], out_dir: Path, basename: str) -> l
     """
     title = TITLES["share"]
     n = max(len(series), 1)
-    # Wide figure so 55 category labels fit when rotated
-    width = max(14.0, 0.32 * n + 2.0)
-    fig, ax = plt.subplots(figsize=(width, 8.5))
+    # Wide figure so many long terminal names fit when rotated
+    width = max(16.0, 0.38 * n + 2.0)
+    fig, ax = plt.subplots(figsize=(width, 10.0))
 
     if not series:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
@@ -139,7 +142,7 @@ def _draw_share_bars(series: Sequence[Slice], out_dir: Path, basename: str) -> l
         ax.bar(x, values, color=colors, edgecolor="white", linewidth=0.4, width=0.8)
 
         ax.set_xticks(list(x))
-        ax.set_xticklabels(labels, fontsize=8, rotation=90, ha="center")
+        ax.set_xticklabels(labels, fontsize=7, rotation=90, ha="center")
         ax.set_ylabel("Containers")
         ax.set_xlabel("Port terminal")
         ax.set_title(title, fontsize=14, pad=12)
@@ -167,38 +170,43 @@ def _draw_share_bars(series: Sequence[Slice], out_dir: Path, basename: str) -> l
 
 
 def _draw_pie(chart_id: str, series: Sequence[Slice], out_dir: Path, basename: str) -> list[Path]:
-    """Pie for few slices (top5 / top5-vs-rest)."""
+    """Pie for top-N charts (legend carries labels; wedges show % only when large enough)."""
     title = TITLES[chart_id]
-    fig, ax = plt.subplots(figsize=(9, 6.5))
+    n = max(len(series), 1)
+    # Extra height/width for long CONCOR names in the legend
+    fig, ax = plt.subplots(figsize=(13, max(8.0, 0.28 * n + 4.0)))
 
     if not series:
         ax.pie([1], labels=["No data"], colors=["#e5e7eb"])
     else:
         labels = [s.label for s in series]
         values = [s.value for s in series]
-        colors = plt.colormaps["Set2"](range(len(series)))
+        # tab20 has 20 distinct colors; cycle if we ever go past that (+ Other)
+        cmap = plt.colormaps["tab20"]
+        colors = [cmap(i % 20) for i in range(len(series))]
 
         wedges, texts, autotexts = ax.pie(
             values,
-            labels=labels,
+            labels=None,  # names live in the legend; every wedge shows %
             autopct=lambda pct: f"{pct:.1f}%",
             startangle=90,
             colors=colors,
-            pctdistance=0.65,
-            wedgeprops=dict(width=0.55, edgecolor="white", linewidth=1.5),
-            textprops=dict(fontsize=10),
+            pctdistance=0.72,
+            wedgeprops=dict(width=0.55, edgecolor="white", linewidth=1.0),
+            textprops=dict(fontsize=8),
         )
         for t in autotexts:
-            t.set_fontsize(9)
+            t.set_fontsize(7)
             t.set_color("#111827")
+            t.set_fontweight("bold")
 
         ax.legend(
             wedges,
             [f"{lab}: {val:,}" for lab, val in zip(labels, values)],
-            title="Containers",
+            title="Terminal (containers)",
             loc="center left",
             bbox_to_anchor=(1.02, 0.5),
-            fontsize=10,
+            fontsize=7,
             frameon=False,
         )
 
